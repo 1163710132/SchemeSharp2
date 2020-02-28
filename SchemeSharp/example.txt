@@ -1,0 +1,2 @@
+(define write (lambda (x y) (print x) (print y)))
+(write "Hello" "World")

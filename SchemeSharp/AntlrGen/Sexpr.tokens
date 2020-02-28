@@ -1,0 +1,16 @@
+T__0=1
+NUMBER=2
+STRING=3
+WHITESPACE=4
+SYMBOL=5
+LPAREN=6
+RPAREN=7
+DOT=8
+PLUS=9
+MINUS=10
+'\''=1
+'('=6
+')'=7
+'.'=8
+'+'=9
+'-'=10
