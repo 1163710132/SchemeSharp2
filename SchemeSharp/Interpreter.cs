@@ -3,26 +3,39 @@ using System.Collections.Generic;
 
 namespace SchemeSharp
 {
+    public delegate void SpecialForm(ISchemeValue args, SchemeContext context, Continuation continuation);
+    
     public class Interpreter
     {
-        public Dictionary<string, Action<ISchemeValue, SchemeContext, Action<ISchemeValue>>> SpecialFormTable { get; }
+        public Dictionary<string, SpecialForm> SpecialFormTable { get; }
+        public SchemeContext GlobalContext { get; private set; }
 
-        public Interpreter()
+        public Interpreter(SchemeContext globalContext = null)
         {
-            SpecialFormTable = new Dictionary<string, Action<ISchemeValue, SchemeContext, Action<ISchemeValue>>>();
+            SpecialFormTable = new Dictionary<string, SpecialForm>();
+            GlobalContext = globalContext ?? new SchemeContext();
             RegisterSpecialForms();
         }
-        public void Evaluate(ISchemeValue ast, SchemeContext context, Action<ISchemeValue> consumer)
+
+        public void EvaluateGlobal(ISchemeValue statement, Action<ISchemeValue> valueConsumer)
+        {
+            Evaluate(statement, GlobalContext, (context, value) =>
+            {
+                GlobalContext = context;
+                valueConsumer?.Invoke(value);
+            });
+        }
+        public void Evaluate(ISchemeValue ast, SchemeContext context, Continuation continuation)
         {
             if (ast.Kind != ISchemeValue.KindCode.Pair)
             {
                 switch (ast.Kind)
                 {
                     case ISchemeValue.KindCode.Symbol:
-                        consumer(context.Get(((SchemeSymbol) ast).Value));
+                        continuation(context, context.Get(((SchemeSymbol) ast).Value));
                         break;
                     default:
-                        consumer(ast);
+                        continuation(context, ast);
                         break;
                 }
             }
@@ -36,52 +49,51 @@ namespace SchemeSharp
                     if (context.ContainsKey(symbol))
                     {
                         var procedure = (SchemeProcedure)context.Get(symbol);
-                        EvaluateEach(right, context, args =>
+                        EvaluateAndTakeAll(right, context, (context2, args) =>
                         {
-                            procedure.Invoke(args, consumer);
+                            procedure.Invoke(args, context2, continuation);
                         });
                     }
                     else if (SpecialFormTable.ContainsKey(symbol))
                     {
-                        SpecialFormTable[symbol](right, context, consumer);
+                        SpecialFormTable[symbol](right, context, continuation);
                     }
                     else
                     {
-                        throw new Exception();
+                        throw new Exception($"Symbol \"{symbol}\" undefined");
                     }
                 }
                 else
                 {
-                    Evaluate(left, context, procedure =>
+                    Evaluate(left, context, (context2, procedure) =>
                     {
-                        EvaluateEach(right, context, args =>
+                        EvaluateAndTakeAll(right, context2, (context3, args) =>
                         {
-                            ((SchemeProcedure) procedure).Invoke(args, consumer);
+                            ((SchemeProcedure) procedure).Invoke(args, context3, continuation);
                         });
                     });
                 }
             }
         }
 
-        public void EvaluateEach(ISchemeValue list, SchemeContext context, Action<ISchemeValue> consumer)
+        public void EvaluateAndTakeAll(ISchemeValue list, SchemeContext context, Continuation continuation)
         {
             switch (list.Kind)
             {
                 case ISchemeValue.KindCode.Pair:
                 {
-                    var (left, right) = ((SchemePair) list).Pair;
-                    Evaluate(left, context, leftValue =>
+                    Evaluate(list.Left(), context, (context2, arg) =>
                     {
-                        EvaluateEach(right, context, rightValue =>
+                        EvaluateAndTakeAll(list.Right(), context2, (context3, args) =>
                         {
-                            consumer(Scheme.Cons(leftValue, rightValue));
+                            continuation(context3, Scheme.Cons(arg, args));
                         });
                     });
                     break;
                 }
                 case ISchemeValue.KindCode.Null:
                 {
-                    consumer(list);
+                    continuation(context, list);
                     break;
                 }
                 default:
@@ -89,45 +101,42 @@ namespace SchemeSharp
             }
         }
 
-        public void RegisterSpecialForm(string name, Action<ISchemeValue, SchemeContext, Action<ISchemeValue>> body)
+        public void EvaluateAndTakeLast(ISchemeValue list, SchemeContext context, Continuation continuation)
+        {
+            switch (list.Kind)
+            {
+                case ISchemeValue.KindCode.Pair:
+                {
+                    var (left, right) = ((SchemePair) list).Pair;
+                    if (right.IsNull())
+                    {
+                        Evaluate(left, context, continuation);
+                    }
+                    else
+                    {
+                        Evaluate(left, context, (context2, _) =>
+                        {
+                            EvaluateAndTakeLast(right, context2, continuation);
+                        });
+                    }
+                    break;
+                }
+                default:
+                    throw new Exception();
+            }
+        }
+
+        public void RegisterSpecialForm(string name, SpecialForm body)
         {
             SpecialFormTable[name] = body;
         }
-
-        public void RegisterSpecialForm(string name, Func<ISchemeValue, SchemeContext, ISchemeValue> body)
+        
+        public static SchemeContext DefineArgs(ISchemeValue parameters, ISchemeValue args, SchemeContext context)
         {
-            SpecialFormTable[name] = (ast, context, consumer) =>
-            {
-                consumer(body(ast, context));
-            };
+            return DefineArgs(Scheme.Tie(parameters, args), context);
         }
         
-        public static void DefineArgs(ISchemeValue parameters, ISchemeValue args, SchemeContext context)
-        {
-            // while (true)
-            // {
-            //     switch (parameters.Kind)
-            //     {
-            //         case ISchemeValue.KindCode.Pair:
-            //         {
-            //             ISchemeValue parameter, arg;
-            //             (parameter, parameters) = ((SchemePair) parameters).Pair;
-            //             (arg, args) = ((SchemePair) args).Pair;
-            //             context.Define(((SchemeString) parameter).Value, arg);
-            //             break;
-            //         }
-            //         case ISchemeValue.KindCode.Null:
-            //         {
-            //             return;
-            //         }
-            //         default:
-            //             throw new Exception();
-            //     }
-            // }
-            DefineArgs(Scheme.Tie(parameters, args), context);
-        }
-        
-        public static void DefineArgs(ISchemeValue parameterAndArgList, SchemeContext context)
+        public static SchemeContext DefineArgs(ISchemeValue parameterAndArgList, SchemeContext context)
         {
             while (true)
             {
@@ -138,12 +147,12 @@ namespace SchemeSharp
                         ISchemeValue parameterAndArg;
                         (parameterAndArg, parameterAndArgList) = ((SchemePair) parameterAndArgList).Pair;
                         var (parameter, arg) = ((SchemePair)parameterAndArg).Pair;
-                        context.Define(((SchemeSymbol) parameter).Value, arg);
+                        context = context.Define(((SchemeSymbol) parameter).Value, arg);
                         break;
                     }
                     case ISchemeValue.KindCode.Null:
                     {
-                        return;
+                        return context;
                     }
                     default:
                         throw new Exception();
@@ -151,45 +160,69 @@ namespace SchemeSharp
             }
         }
 
+        public void LetStarHelper(ISchemeValue localExprList, ISchemeValue statementList, SchemeContext context, Continuation continuation)
+        {
+            if (localExprList.IsNull())
+            {
+                EvaluateAndTakeLast(statementList, context, continuation);
+            }
+            else
+            {
+                var parameterAndArgExpr = localExprList.Left();
+                var parameter = parameterAndArgExpr.Item(0);
+                var argExpr = parameterAndArgExpr.Item(1);
+                Evaluate(argExpr, context, (context2, argValue) =>
+                {
+                    var context3 = context2.Define(parameter.AsSymbol().Value, argValue);
+                    LetStarHelper(localExprList.Right(), statementList, context3, continuation);
+                });
+            }
+        }
+
+        public void LetHelper(ISchemeValue localExprList, ISchemeValue localList, ISchemeValue statementList, SchemeContext context, Continuation continuation)
+        {
+            if (localExprList.IsNull())
+            {
+                while (!localList.IsNull())
+                {
+                    var (parameter, arg) = localList.Left().Pair();
+                    localList = localList.Right();
+                    context = context.Define(parameter.AsSymbol().Value, arg);
+                }
+
+                EvaluateAndTakeLast(statementList, context, continuation);
+            }
+            else
+            {
+                var parameterAndArgExpr = localExprList.Left();
+                var parameter = parameterAndArgExpr.Item(0);
+                var argExpr = parameterAndArgExpr.Item(1);
+                Evaluate(argExpr, context, (context2, argValue) =>
+                {
+                    localList = Scheme.Cons(Scheme.Cons(parameter, argValue), localList);
+                    LetHelper(localExprList.Right(), localList, 
+                        statementList, context2, continuation);
+                });
+            }
+        }
+
         internal void RegisterSpecialForms()
         {
-            RegisterSpecialForm("lambda", (ast, context, consumer) =>
+            RegisterSpecialForm("lambda", (ast, context, continuation) =>
             {
                 var (parameters, statements) = ((SchemePair) ast).Pair;
-                consumer(new SchemeProcedure((args, procedureConsumer)=>
+                var procedure = new SchemeProcedure((args, context2, continuation2) =>
                 {
-                    
-                    DefineArgs(parameters, args, context);
-                    ISchemeValue result = Scheme.Null();
-                    while (true)
+                    var context3 = DefineArgs(parameters, args, new SchemeContext(context2));
+                    EvaluateAndTakeLast(statements, context3, (context4, value) =>
                     {
-                        switch (statements.Kind)
-                        {
-                            case ISchemeValue.KindCode.Pair:
-                            {
-                                ISchemeValue statement;
-                                (statement, statements) = ((SchemePair) statements).Pair;
-                                Evaluate(statement, context, statementResult =>
-                                {
-                                    result = statementResult;
-                                });
-                                break;
-                            }
-                            case ISchemeValue.KindCode.Null:
-                            {
-                                procedureConsumer(result);
-                                break;
-                            }
-                            default:
-                            {
-                                throw new Exception();
-                            }
-                        }
-                    }
-                }));
+                        continuation2(context4.Parent, value);
+                    });
+                });
+                continuation(context, procedure);
             });
             
-            RegisterSpecialForm("define", (ast, context, consumer) =>
+            RegisterSpecialForm("define", (ast, context, continuation) =>
             {
                 var (left, right) = ((SchemePair) ast).Pair;
                 var (expr, _) = ((SchemePair) right).Pair;
@@ -197,9 +230,10 @@ namespace SchemeSharp
                 {
                     case ISchemeValue.KindCode.Symbol:
                     {
-                        Evaluate(expr, context, value =>
+                        Evaluate(expr, context, (context2, value) =>
                         {
-                            context.Define(((SchemeSymbol) left).Value, value);
+                            var context3 = context2.Define(((SchemeSymbol) left).Value, value);
+                            continuation(context3, null);
                         });
                         break;
                     }
@@ -207,17 +241,48 @@ namespace SchemeSharp
                     {
                         var (symbol, parameters) = ((SchemePair) left).Pair;
                         var symbolText = ((SchemeSymbol) symbol).Value;
-                        var procedure = new SchemeProcedure((args, procedureConsumer) =>
+                        var procedure = new SchemeProcedure((args, context3, procedureConsumer) =>
                         {
-                            Evaluate(expr, context, procedureConsumer);
+                            var context4 = DefineArgs(parameters, args, context3);
+                            Evaluate(expr, context4, procedureConsumer);
                         });
-                        context.Define(symbolText, procedure);
+                        var context2 = context.Define(symbolText, procedure);
+                        continuation(context2, null);
                         break;
                     }
                 }
             });
             
-            RegisterSpecialForm("quote", (ast, context, consumer) => { consumer(ast); });
+            RegisterSpecialForm("quote", (ast, context, continuation) =>
+            {
+                continuation(context, ast);
+            });
+            
+            RegisterSpecialForm("set!", (ast, context, continuation) =>
+            {
+                var (left, right) = ((SchemePair) ast).Pair;
+                var (expr, _) = ((SchemePair) right).Pair;
+                Evaluate(expr, context, (context2, value) =>
+                {
+                    context2.Set(((SchemeSymbol) left).Value, value);
+                    continuation(context2, null);
+                });
+            });
+
+            RegisterSpecialForm("let*", (ast, context, continuation) =>
+            {
+                var (localExprList, statementList) = ast.Pair();
+                LetStarHelper(localExprList, statementList, new SchemeContext(context), (context2, value) =>
+                {
+                    continuation(context2.Parent, value);
+                });
+            });
+            
+            RegisterSpecialForm("let", (ast, context, continuation) =>
+            {
+                var (localExprList, statementList) = ast.Pair();
+                LetHelper(localExprList, Scheme.Null(), statementList, context, continuation);
+            });
         }
     }
 }

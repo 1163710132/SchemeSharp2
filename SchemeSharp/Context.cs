@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Text;
 
 namespace SchemeSharp
@@ -8,33 +9,42 @@ namespace SchemeSharp
     {
         public SchemeContext Parent { get; }
 
-        public SchemeContext(SchemeContext parent = null)
+        public ImmutableDictionary<string, SchemeVariable> Variable { get; }
+
+        public SchemeContext(SchemeContext parent = null, ImmutableDictionary<string, SchemeVariable> variable = null)
         {
             Parent = parent;
-            Variable = new Dictionary<string, ISchemeValue>();
+            Variable = variable ?? ImmutableDictionary<string, SchemeVariable>.Empty;
         }
 
-        public Dictionary<string, ISchemeValue> Variable { get; }
+        public ISchemeValue Get(string key) => GetVariable(key)?.Value;
 
-        public ISchemeValue Get(string key) => Variable.ContainsKey(key) ? Variable[key] : Parent?.Get(key);
-
-        public void Define(string key, ISchemeValue value)
+        public SchemeVariable GetVariable(string key) => Variable.ContainsKey(key) ? Variable[key] : Parent?.GetVariable(key);
+        
+        public SchemeContext Define(string key, ISchemeValue value)
         {
-            Variable[key] = value;
+            return new SchemeContext(Parent, Variable.Add(key, new SchemeVariable(value)));
         }
 
         public void Set(string key, ISchemeValue value)
         {
-            if (Variable.ContainsKey(key))
-            {
-                Variable[key] = value;
-            }
-            else
-            {
-                Parent?.Set(key, value);
-            }
+            GetVariable(key).Value = value;
         }
 
         public bool ContainsKey(string key) => Get(key) != null;
+    }
+
+    public class SchemeVariable
+    {
+        public ISchemeValue Value { get; set; }
+
+        public SchemeVariable(ISchemeValue value)
+        {
+            Value = value;
+        }
+
+        public SchemeVariable()
+        {
+        }
     }
 }

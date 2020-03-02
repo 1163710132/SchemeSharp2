@@ -56,10 +56,13 @@ namespace SchemeSharp
         public BigInteger Nominator { get; }
         public BigInteger Denominator { get; }
 
+        public bool IsZero => Nominator == 0;
+
         public SchemeRational(BigInteger nominator, BigInteger denominator)
         {
-            Nominator = nominator;
-            Denominator = denominator;
+            var gcd = BigInteger.GreatestCommonDivisor(nominator, denominator);
+            Nominator = nominator / gcd;
+            Denominator = denominator / gcd;
         }
 
         public SchemeRational Minus()
@@ -70,6 +73,29 @@ namespace SchemeSharp
         public SchemeRational AttachSign(bool sign)
         {
             return !sign ? new SchemeRational(-Nominator, Denominator) : this;
+        }
+        
+        public static SchemeRational operator+(SchemeRational left, SchemeRational right)
+        {
+            var leftNomi = left.Nominator * right.Denominator;
+            var rightNomi = right.Nominator * left.Denominator;
+            var denominator = left.Denominator * right.Denominator;
+            return new SchemeRational(leftNomi + rightNomi, denominator);
+        }
+        
+        public static SchemeRational operator-(SchemeRational left, SchemeRational right)
+        {
+            var leftNomi = left.Nominator * right.Denominator;
+            var rightNomi = right.Nominator * left.Denominator;
+            var denominator = left.Denominator * right.Denominator;
+            return new SchemeRational(leftNomi - rightNomi, denominator);
+        }
+        
+        public static SchemeRational operator*(SchemeRational left, SchemeRational right)
+        {
+            var nominator = left.Nominator * right.Nominator;
+            var denominator = left.Denominator * right.Denominator;
+            return new SchemeRational(nominator, denominator);
         }
 
         public static SchemeRational operator -(SchemeRational rational)
@@ -122,6 +148,22 @@ namespace SchemeSharp
 
             return new SchemeRational(BigInteger.Parse(text), 1).AttachSign(sign);
         }
+
+        public override string ToString()
+        {
+            if (Nominator == 0)
+            {
+                return "0";
+            }
+            else if (Denominator == 1)
+            {
+                return Nominator.ToString();
+            }
+            else
+            {
+                return $"{Nominator}/{Denominator}";
+            }
+        }
     }
 
     public class SchemeComplex
@@ -134,6 +176,45 @@ namespace SchemeSharp
             Real = real;
             Imaginary = imaginary;
         }
+        
+        public static SchemeComplex operator+(SchemeComplex left, SchemeComplex right)
+        {
+            return new SchemeComplex(left.Real + right.Real, left.Imaginary + right.Imaginary);
+        }
+        
+        public static SchemeComplex operator-(SchemeComplex left, SchemeComplex right)
+        {
+            return new SchemeComplex(left.Real - right.Real, left.Imaginary - right.Imaginary);
+        }
+        
+        public static SchemeComplex operator*(SchemeComplex left, SchemeComplex right)
+        {
+            var prodRr = left.Real * right.Real;
+            var prodRi = left.Real * right.Imaginary;
+            var prodIr = left.Imaginary * right.Real;
+            var prodIi = left.Imaginary * right.Imaginary;
+            return new SchemeComplex(prodRr - prodIi, prodRi + prodIr);
+        }
+
+        public override string ToString()
+        {
+            if (Imaginary.Nominator == 0)
+            {
+                return Real.ToString();
+            }
+            else if (Real.Nominator == 0)
+            {
+                return $"{Imaginary}i";
+            }
+            else if(Imaginary.Nominator > 0)
+            {
+                return $"{Real}+{Imaginary}i";
+            }
+            else
+            {
+                return $"{Real}{Imaginary}i";
+            }
+        }
     }
 
     public class SchemeNumber : ISchemeValue
@@ -145,6 +226,26 @@ namespace SchemeSharp
         public SchemeNumber(SchemeComplex value)
         {
             Value = value;
+        }
+        
+        public static SchemeNumber operator+(SchemeNumber left, SchemeNumber right)
+        {
+            return new SchemeNumber(left.Value + right.Value);
+        }
+        
+        public static SchemeNumber operator-(SchemeNumber left, SchemeNumber right)
+        {
+            return new SchemeNumber(left.Value - right.Value);
+        }
+        
+        public static SchemeNumber operator*(SchemeNumber left, SchemeNumber right)
+        {
+            return new SchemeNumber(left.Value * right.Value);
+        }
+
+        public override string ToString()
+        {
+            return Value.ToString();
         }
     }
 
@@ -225,16 +326,16 @@ namespace SchemeSharp
     {
         public ISchemeValue.KindCode Kind => ISchemeValue.KindCode.Procedure;
 
-        public Action<ISchemeValue, Action<ISchemeValue>> Value { get; }
+        public Action<ISchemeValue, SchemeContext, Continuation> Value { get; }
 
-        public SchemeProcedure(Action<ISchemeValue, Action<ISchemeValue>> value)
+        public SchemeProcedure(Action<ISchemeValue, SchemeContext, Continuation> value)
         {
             Value = value;
         }
 
-        public void Invoke(ISchemeValue args, Action<ISchemeValue> consumer)
+        public void Invoke(ISchemeValue args, SchemeContext context, Continuation continuation)
         {
-            Value.Invoke(args, consumer);
+            Value.Invoke(args, context, continuation);
         }
     }
 

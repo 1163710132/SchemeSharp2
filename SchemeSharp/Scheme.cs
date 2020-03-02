@@ -4,6 +4,8 @@ using System.Text;
 
 namespace SchemeSharp
 {
+    public delegate void Continuation(SchemeContext context, ISchemeValue value);
+    
     public static class Scheme
     {
         public static SchemePair Cons(ISchemeValue left, ISchemeValue right)
@@ -74,9 +76,26 @@ namespace SchemeSharp
                 pos++;
             }
 
+            if (builder.Length > 0)
+            {
+                real = SchemeRational.Parse(builder.ToString());
+                builder.Clear();
+            }
+
             return new SchemeNumber(new SchemeComplex(real, imaginary));
         }
 
+        public static SchemeNumber AsNumber(this ISchemeValue number)
+        {
+            return (SchemeNumber) number;
+        }
+
+        public static SchemeSymbol AsSymbol(this ISchemeValue symbol)
+        {
+            return (SchemeSymbol) symbol;
+        }
+
+        //Dangerous: Breaking continuation
         public static void ForEachInList(ISchemeValue list, Action<ISchemeValue> consumer)
         {
             switch (list.Kind)
@@ -144,10 +163,46 @@ namespace SchemeSharp
             }
         }
 
-        public static bool IsList(ISchemeValue sexpr)
+        public static bool IsList(this ISchemeValue sexpr)
         {
             return sexpr.Kind == ISchemeValue.KindCode.Null ||
                    sexpr.Kind == ISchemeValue.KindCode.Pair && IsList(((SchemePair)sexpr).Right);
+        }
+
+        public static bool IsNull(this ISchemeValue sexpr)
+        {
+            return sexpr.Kind == ISchemeValue.KindCode.Null;
+        }
+
+        public static ISchemeValue Item(this ISchemeValue list, int index)
+        {
+            if (index == 0)
+            {
+                return ((SchemePair) list).Left;
+            }
+            else if(index > 0)
+            {
+                return Item(((SchemePair) list).Right, index - 1);
+            }
+            else
+            {
+                throw new Exception();
+            }
+        }
+
+        public static ISchemeValue Left(this ISchemeValue pair)
+        {
+            return ((SchemePair) pair).Left;
+        }
+
+        public static ISchemeValue Right(this ISchemeValue pair)
+        {
+            return ((SchemePair) pair).Right;
+        }
+
+        public static (ISchemeValue, ISchemeValue) Pair(this ISchemeValue pair)
+        {
+            return (Left(pair), Right(pair));
         }
     }
 }

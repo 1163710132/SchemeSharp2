@@ -1,2 +1,6 @@
-(define write (lambda (x y) (print x) (print y)))
-(write "Hello" "World")
+(let* 
+    ((yin  ((lambda (cc) (write "@") cc) 
+                (call/cc (lambda (c) c))))
+     (yang ((lambda (cc) (write "*") cc) 
+                (call/cc (lambda (c) c)))))
+    (yin yang))

@@ -57,7 +57,7 @@ NUMBER
     ;
 
 STRING
-   : '"' ('\\' . | ~ ('\\' | '"'))* '"'
+   : '"' ('\\' . | ~ ('\\' | '"'))* '"' | '#' 
    ;
 
 WHITESPACE
@@ -65,7 +65,7 @@ WHITESPACE
    ;
 
 SYMBOL
-   : SYMBOL_START (SYMBOL_START | DIGIT)*
+   : SYMBOL_START (SYMBOL_START | DIGIT | SYMBOL_NO_START)*
    ;
 
 LPAREN
@@ -125,6 +125,10 @@ fragment SYMBOL_START
    | '*'
    | '/'
    | '.'
+   ;
+   
+fragment SYMBOL_NO_START
+   : '!'
    ;
 
 fragment DIGIT
